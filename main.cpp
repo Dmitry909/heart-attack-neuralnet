@@ -31,7 +31,7 @@ public:
     Neuron() {
         weights = vector<double>(cntInputs + 1);
         for (int i = 0; i < weights.size(); i++) {
-            weights[i] = (abs((int) rnd()) % 20000 - 10000) / 10000.0;
+            weights[i] = (abs((int) rnd()) % 20000 - 10000) / 50000.0;
         }
     }
 
@@ -116,20 +116,33 @@ public:
         }
     }
 
-    void printWeights() {
-        cout << "w_i_j = { ";
+    void saveWeightsToFile(string filename) {
+        ofstream fout(filename);
         for (int j = 0; j < cntInputs; j++) {
-            cout << "{ ";
-            for (auto w : hiddenNeurons[j].weights) {
-                cout << w << ", ";
+            for (auto &w : hiddenNeurons[j].weights) {
+                fout << w << " ";
             }
-            if (j + 1 == cntInputs) {
-                cout << "} \n";
-            } else {
-                cout << "}, \n";
+            fout << "\n";
+        }
+        fout << "#########\n";
+        for (auto w : outputNeuron.weights) {
+            fout << w << " ";
+        }
+        fout << outputNeuron.weights.back() << " }\n";
+    }
+
+    void readWeightsFromFile(string filename) {
+        ifstream fin(filename);
+        for (int j = 0; j < cntInputs; j++) {
+            for (auto &w : hiddenNeurons[j].weights) {
+                fin >> w;
             }
         }
-        cout << "}";
+        string sharp;
+        fin >> sharp;
+        for (auto &w : outputNeuron.weights) {
+            fin >> w;
+        }
     }
 };
 
@@ -166,6 +179,27 @@ int main() {
         data.push_back({splittedInput, y});
     }
     shuffle(data.begin(), data.end(), rnd);
+    vector<double> maxParamVal(cntInputs, -1e9);
+    vector<double> minParamVal(cntInputs, 1e9);
+    vector<double> meanParamVal(cntInputs);
+    for (int i = 0; i < data.size() / 2; i++) {
+        for (int j = 0; j < cntInputs; j++) {
+            maxParamVal[j] = max(maxParamVal[j], data[i].first[j]);
+            minParamVal[j] = min(minParamVal[j], data[i].first[j]);
+        }
+    }
+    for (int i = 0; i < cntInputs; i++) {
+        meanParamVal[i] = (maxParamVal[i] + minParamVal[i]) / 2;
+    }
+    for (int i = 0; i < data.size(); i++) {
+        for (int j = 0; j < cntInputs; j++) {
+            data[i].first[j] -= meanParamVal[j];
+            if (maxParamVal[j] - minParamVal[j] > 0.00001) {
+                double qq = (maxParamVal[j] - minParamVal[j]) / 2;
+                data[i].first[j] /= (maxParamVal[j] - minParamVal[j]) / 2;
+            }
+        }
+    }
     vector<pair<vector<double>, double>> trainSubSet, testSubSet;
     for (int i = 0; i < data.size(); i++) {
         if (i < data.size() / 2) {
@@ -176,31 +210,44 @@ int main() {
     }
     NeuralNet net;
     double ma = 0;
-    for (int i = 0; i < 50; i++) {
-        int seed = chrono::high_resolution_clock::now().time_since_epoch().count();
-        rnd = mt19937(seed);
-        net = NeuralNet();
-        for (int j = 0; j < 1000; j++) {
-            vector<vector<double>> deltas_w_i_j(cntInputs + 1, vector<double>(cntInputs));
-            vector<double> deltas_w_out(cntInputs);
-            for (auto[inputs, yRight] : trainSubSet) {
-                net.recalcGradient(inputs, yRight, deltas_w_i_j, deltas_w_out);
+    for (int up = 5200; up <= 40000; up += 300) {
+        double sum = 0;
+        for (int ii = 0; ii < 5; ii++) {
+            int seed = chrono::high_resolution_clock::now().time_since_epoch().count();
+            rnd = mt19937(seed);
+            net = NeuralNet();
+            for (int j = 0; j < up; j++) {
+                vector<vector<double>> deltas_w_i_j(cntInputs + 1, vector<double>(cntInputs));
+                vector<double> deltas_w_out(cntInputs);
+                for (auto[inputs, yRight] : trainSubSet) {
+                    net.recalcGradient(inputs, yRight, deltas_w_i_j, deltas_w_out);
+                }
+                net.addGradient(deltas_w_i_j, deltas_w_out);
+//            if (j % 100 == 0) {
+//                cout << "iteration " << j << ": loss function = " << net.lossFunc(trainSubSet) << '\n';
+//            }
             }
-            net.addGradient(deltas_w_i_j, deltas_w_out);
-        }
-        int predicted = 0;
-        for (auto[inputs, yRight] : testSubSet) {
-            double ans = net.calculate(inputs);
-            if (ans >= 0.5) {
-                predicted += yRight == 1;
-            } else {
-                predicted += yRight == 0;
+            int predicted = 0;
+            for (auto[inputs, yRight] : testSubSet) {
+                double ans = net.calculate(inputs);
+                if (ans >= 0.5) {
+                    predicted += yRight == 1;
+                } else {
+                    predicted += yRight == 0;
+                }
+            }
+            sum += (double) predicted / testSubSet.size() * 100;
+            if ((double) predicted / testSubSet.size() * 100 > ma) {
+                ma = (double) predicted / testSubSet.size() * 100;
+                string filename = "../";
+                filename += to_string(ma);
+                filename += ".dat";
+                net.saveWeightsToFile(filename);
             }
         }
-        cout << "predicted: " << (double) predicted / testSubSet.size() * 100 << '%' << endl;
-        ma = max(ma, (double) predicted / testSubSet.size() * 100);
+        cout << "up = " << up << "mean_predicted: " << (double) sum / 5 << '%' << endl;
     }
-    cout << "max percent: " << ma << '%';
+    // cout << "max percent: " << ma << '%';
     exit(0);
     for (int i = 0; i < cntLaunches; i++) {
         vector<vector<double>> deltas_w_i_j(cntInputs + 1, vector<double>(cntInputs));
